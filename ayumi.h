@@ -66,6 +66,9 @@ void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on
 void ayumi_set_volume(struct ayumi* ay, int index, int volume);
 void ayumi_set_envelope(struct ayumi* ay, int period);
 void ayumi_set_envelope_shape(struct ayumi* ay, int shape);
+void ayumi_begin_output_frame(struct ayumi* ay);
+void ayumi_output_inner_slot(struct ayumi* ay, int i);
+void ayumi_finish_output_frame(struct ayumi* ay);
 void ayumi_process(struct ayumi* ay);
 void ayumi_remove_dc(struct ayumi* ay);
 
