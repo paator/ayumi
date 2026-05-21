@@ -7,7 +7,19 @@ enum {
   TONE_CHANNELS = 3,
   DECIMATE_FACTOR = 8,
   FIR_SIZE = 192,
-  DC_FILTER_SIZE = 1024
+  DC_FILTER_SIZE = 1024,
+  SID_WAVEFORM_MAX = 32
+};
+
+struct sid_state {
+  int enabled;
+  int period;
+  int counter;
+  int position;
+  int length;
+  int loop;
+  int base_volume;
+  int waveform[SID_WAVEFORM_MAX];
 };
 
 struct tone_channel {
@@ -18,6 +30,7 @@ struct tone_channel {
   int n_off;
   int e_on;
   int volume;
+  struct sid_state sid;
   double pan_left;
   double pan_right;
 };
@@ -64,6 +77,10 @@ void ayumi_set_tone(struct ayumi* ay, int index, int period);
 void ayumi_set_noise(struct ayumi* ay, int period);
 void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on);
 void ayumi_set_volume(struct ayumi* ay, int index, int volume);
+void ayumi_set_sid(struct ayumi* ay, int index, int enabled, int period, int base_volume);
+void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
+void ayumi_sid_reset(struct ayumi* ay, int index);
+int ayumi_struct_size(void);
 void ayumi_set_envelope(struct ayumi* ay, int period);
 void ayumi_set_envelope_shape(struct ayumi* ay, int shape);
 void ayumi_begin_output_frame(struct ayumi* ay);

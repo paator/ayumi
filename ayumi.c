@@ -126,19 +126,66 @@ int update_envelope(struct ayumi* ay) {
   return ay->envelope;
 }
 
+static void update_sid(struct tone_channel* ch) {
+  struct sid_state* sid = &ch->sid;
+  if (!sid->enabled || sid->length <= 0) {
+    return;
+  }
+  if (sid->period <= 0) {
+    sid->period = 1;
+  }
+  sid->counter += 1;
+  if (sid->counter >= sid->period) {
+    sid->counter = 0;
+    sid->position += 1;
+    if (sid->position >= sid->length) {
+      sid->position = sid->loop >= 0 && sid->loop < sid->length ? sid->loop : 0;
+    }
+  }
+}
+
+static int sid_volume_index(struct tone_channel* ch) {
+  struct sid_state* sid = &ch->sid;
+  int w;
+  int vol;
+  if (!sid->enabled || sid->length <= 0) {
+    return ch->volume * 2 + 1;
+  }
+  if (sid->position < 0 || sid->position >= sid->length) {
+    sid->position = 0;
+  }
+  w = sid->waveform[sid->position] & 0xf;
+  if (w == 0) {
+    return 0;
+  }
+  vol = (w * sid->base_volume + 14) / 15;
+  if (vol > 15) {
+    vol = 15;
+  }
+  return vol * 2 + 1;
+}
+
 static void update_mixer(struct ayumi* ay) {
   int i;
   int out;
+  int vol_index;
   int noise = update_noise(ay);
   int envelope = update_envelope(ay);
   ay->left = 0;
   ay->right = 0;
   for (i = 0; i < TONE_CHANNELS; i += 1) {
-    out = (update_tone(ay, i) | ay->channels[i].t_off) & (noise | ay->channels[i].n_off);
-    out *= ay->channels[i].e_on ? envelope : ay->channels[i].volume * 2 + 1;
+    struct tone_channel* ch = &ay->channels[i];
+    out = (update_tone(ay, i) | ch->t_off) & (noise | ch->n_off);
+    update_sid(ch);
+    if (ch->sid.enabled && !ch->e_on) {
+      vol_index = sid_volume_index(ch);
+    } else {
+      vol_index = ch->e_on ? envelope : ch->volume * 2 + 1;
+    }
+    out *= vol_index;
     ay->channel_out[i] = ay->dac_table[out];
-    ay->left += ay->channel_out[i] * ay->channels[i].pan_left;
-    ay->right += ay->channel_out[i] * ay->channels[i].pan_right;
+    ay->left += ay->channel_out[i] * ch->pan_left;
+    ay->right += ay->channel_out[i] * ch->pan_right;
   }
 }
 
@@ -183,6 +230,52 @@ void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on
 
 void ayumi_set_volume(struct ayumi* ay, int index, int volume) {
   ay->channels[index].volume = volume & 0xf;
+}
+
+void ayumi_set_sid(struct ayumi* ay, int index, int enabled, int period, int base_volume) {
+  struct sid_state* sid = &ay->channels[index].sid;
+  sid->enabled = enabled & 1;
+  sid->period = period <= 0 ? 1 : period;
+  sid->base_volume = base_volume & 0xf;
+}
+
+void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
+  struct sid_state* sid = &ay->channels[index].sid;
+  int i;
+  int copy_length = length;
+  if (copy_length > SID_WAVEFORM_MAX) {
+    copy_length = SID_WAVEFORM_MAX;
+  }
+  if (copy_length < 0) {
+    copy_length = 0;
+  }
+  for (i = 0; i < copy_length; i += 1) {
+    sid->waveform[i] = values[i] & 0xf;
+  }
+  sid->length = copy_length;
+  if (sid->length <= 0) {
+    sid->position = 0;
+    sid->counter = 0;
+    sid->loop = 0;
+    return;
+  }
+  if (loop < 0 || loop >= sid->length) {
+    sid->loop = 0;
+  } else {
+    sid->loop = loop;
+  }
+  if (sid->position >= sid->length) {
+    sid->position = 0;
+  }
+}
+
+void ayumi_sid_reset(struct ayumi* ay, int index) {
+  ay->channels[index].sid.counter = 0;
+  ay->channels[index].sid.position = 0;
+}
+
+int ayumi_struct_size(void) {
+  return (int) sizeof(struct ayumi);
 }
 
 void ayumi_set_envelope(struct ayumi* ay, int period) {
