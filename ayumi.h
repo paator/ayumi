@@ -22,6 +22,13 @@ struct sid_state {
   int waveform[SID_WAVEFORM_MAX];
 };
 
+struct syncbuzzer_state {
+  int enabled;
+  int period;
+  int counter;
+  int shape;
+};
+
 struct tone_channel {
   int tone_period;
   int tone_counter;
@@ -31,6 +38,7 @@ struct tone_channel {
   int e_on;
   int volume;
   struct sid_state sid;
+  struct syncbuzzer_state syncbuzzer;
   double pan_left;
   double pan_right;
 };
@@ -80,6 +88,8 @@ void ayumi_set_volume(struct ayumi* ay, int index, int volume);
 void ayumi_set_sid(struct ayumi* ay, int index, int enabled, int period, int base_volume);
 void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
 void ayumi_sid_reset(struct ayumi* ay, int index);
+void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, int shape);
+void ayumi_syncbuzzer_reset(struct ayumi* ay, int index);
 int ayumi_struct_size(void);
 void ayumi_set_envelope(struct ayumi* ay, int period);
 void ayumi_set_envelope_shape(struct ayumi* ay, int shape);

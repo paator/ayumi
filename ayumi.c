@@ -165,6 +165,21 @@ static int sid_volume_index(struct tone_channel* ch) {
   return vol * 2 + 1;
 }
 
+static void update_syncbuzzer(struct ayumi* ay, int index) {
+  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
+  if (!syncbuzzer->enabled) {
+    return;
+  }
+  if (syncbuzzer->period <= 0) {
+    syncbuzzer->period = 1;
+  }
+  syncbuzzer->counter += 1;
+  if (syncbuzzer->counter >= syncbuzzer->period) {
+    syncbuzzer->counter = 0;
+    ayumi_set_envelope_shape(ay, syncbuzzer->shape);
+  }
+}
+
 static void update_mixer(struct ayumi* ay) {
   int i;
   int out;
@@ -177,6 +192,7 @@ static void update_mixer(struct ayumi* ay) {
     struct tone_channel* ch = &ay->channels[i];
     out = (update_tone(ay, i) | ch->t_off) & (noise | ch->n_off);
     update_sid(ch);
+    update_syncbuzzer(ay, i);
     if (ch->sid.enabled && !ch->e_on) {
       vol_index = sid_volume_index(ch);
     } else {
@@ -272,6 +288,17 @@ void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int 
 void ayumi_sid_reset(struct ayumi* ay, int index) {
   ay->channels[index].sid.counter = 0;
   ay->channels[index].sid.position = 0;
+}
+
+void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, int shape) {
+  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
+  syncbuzzer->enabled = enabled & 1;
+  syncbuzzer->period = period <= 0 ? 1 : period;
+  syncbuzzer->shape = shape & 0xf;
+}
+
+void ayumi_syncbuzzer_reset(struct ayumi* ay, int index) {
+  ay->channels[index].syncbuzzer.counter = 0;
 }
 
 int ayumi_struct_size(void) {
@@ -440,7 +467,7 @@ void ayumi_process(struct ayumi* ay) {
 
 static double dc_filter(struct dc_filter* dc, int index, double x) {
   dc->sum += -dc->delay[index] + x;
-  dc->delay[index] = x; 
+  dc->delay[index] = x;
   return x - dc->sum / DC_FILTER_SIZE;
 }
 
