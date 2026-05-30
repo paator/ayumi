@@ -20,6 +20,8 @@ struct sid_state {
   int loop;
   int base_volume;
   int waveform[SID_WAVEFORM_MAX];
+  int pwm_enabled;
+  int period_low;
 };
 
 struct syncbuzzer_state {
@@ -86,10 +88,12 @@ void ayumi_set_noise(struct ayumi* ay, int period);
 void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on);
 void ayumi_set_volume(struct ayumi* ay, int index, int volume);
 void ayumi_set_sid(struct ayumi* ay, int index, int enabled, int period, int base_volume);
+void ayumi_set_sid_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low, int base_volume);
 void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
 void ayumi_sid_reset(struct ayumi* ay, int index);
 void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, int shape);
 void ayumi_syncbuzzer_reset(struct ayumi* ay, int index);
+int ayumi_get_sid_active_period(struct ayumi* ay, int index);
 int ayumi_struct_size(void);
 void ayumi_set_envelope(struct ayumi* ay, int period);
 void ayumi_set_envelope_shape(struct ayumi* ay, int shape);

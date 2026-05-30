@@ -128,14 +128,24 @@ int update_envelope(struct ayumi* ay) {
 
 static void update_sid(struct tone_channel* ch) {
   struct sid_state* sid = &ch->sid;
+  int active_period;
+  int w;
   if (!sid->enabled || sid->length <= 0) {
     return;
   }
-  if (sid->period <= 0) {
-    sid->period = 1;
+  active_period = sid->period;
+  if (sid->pwm_enabled) {
+    if (sid->position < 0 || sid->position >= sid->length) {
+      sid->position = 0;
+    }
+    w = sid->waveform[sid->position] & 0xf;
+    active_period = (w == 0) ? sid->period_low : sid->period;
+  }
+  if (active_period <= 0) {
+    active_period = 1;
   }
   sid->counter += 1;
-  if (sid->counter >= sid->period) {
+  if (sid->counter >= active_period) {
     sid->counter = 0;
     sid->position += 1;
     if (sid->position >= sid->length) {
@@ -253,6 +263,17 @@ void ayumi_set_sid(struct ayumi* ay, int index, int enabled, int period, int bas
   sid->enabled = enabled & 1;
   sid->period = period <= 0 ? 1 : period;
   sid->base_volume = base_volume & 0xf;
+  sid->pwm_enabled = 0;
+  sid->period_low = sid->period;
+}
+
+void ayumi_set_sid_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low, int base_volume) {
+  struct sid_state* sid = &ay->channels[index].sid;
+  sid->enabled = enabled & 1;
+  sid->period = period_high <= 0 ? 1 : period_high;
+  sid->period_low = period_low <= 0 ? 1 : period_low;
+  sid->base_volume = base_volume & 0xf;
+  sid->pwm_enabled = enabled & 1;
 }
 
 void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
@@ -299,6 +320,25 @@ void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, 
 
 void ayumi_syncbuzzer_reset(struct ayumi* ay, int index) {
   ay->channels[index].syncbuzzer.counter = 0;
+}
+
+int ayumi_get_sid_active_period(struct ayumi* ay, int index) {
+  struct sid_state* sid = &ay->channels[index].sid;
+  int w;
+  if (!sid->enabled) {
+    return 0;
+  }
+  if (!sid->pwm_enabled || sid->length <= 0) {
+    return sid->period <= 0 ? 1 : sid->period;
+  }
+  if (sid->position < 0 || sid->position >= sid->length) {
+    sid->position = 0;
+  }
+  w = sid->waveform[sid->position] & 0xf;
+  if (w == 0) {
+    return sid->period_low <= 0 ? 1 : sid->period_low;
+  }
+  return sid->period <= 0 ? 1 : sid->period;
 }
 
 int ayumi_struct_size(void) {
