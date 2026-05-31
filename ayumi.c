@@ -4,6 +4,8 @@
 #include <math.h>
 #include "ayumi.h"
 
+static double ST_dac_table[32][32][32];
+
 static const double AY_dac_table[] = {
   0.0, 0.0,
   0.00999465934234, 0.00999465934234,
@@ -41,6 +43,72 @@ static const double YM_dac_table[] = {
   0.635172045472, 0.75800717174,
   0.879926756695, 1.0
 };
+
+static void generate_dac(double dac[32][32][32]) {
+	// Thanks Hatari (copied as-is from Hatari)
+	// Cheap hack but we only run this once
+	const double MaxVol = 1.0;                 /* Normal Mode Maximum value in table */
+	const double FOURTH2 = 1.19;                  /* Fourth root of two from YM2149 */
+	const double WARP = 1.666666666666666667;    /* measured as 1.65932 from 46602 */
+
+	double conductance;
+	double conductance_[32];
+	int	i, j, k;
+
+	/**
+	 * YM2149 and R8=1k follows (2^-1/4)^(n-31) better when 2 voices are
+	 * summed (A+B or B+C or C+A) rather than individually (A or B or C):
+	 *   conductance = 2.0/3.0/(1.0-1.0/WARP)-2.0/3.0;
+	 * When taken into consideration with three voices.
+	 *
+	 * Note that the YM2149 does not use laser trimmed resistances, thus
+	 * has offsets that are added and/or multiplied with (2^-1/4)^(n-31).
+	 */
+	conductance = 2.0 / 3.0 / (1.0 - 1.0 / WARP) - 2.0 / 3.0; /* conductance = 1.0 */
+
+	/**
+	 * Because the YM current output (voltage source with series resistances)
+	 * is connected to a grounded resistor to develop the output voltage
+	 * (instead of a current to voltage converter), the output transfer
+	 * function is not linear. Thus:
+	 * 2.0*conductance_[n] = 1.0/(1.0-1.0/FOURTH2/(1.0/conductance + 1.0))-1.0;
+	 */
+	for (i = 31; i >= 1; i--)
+	{
+		conductance_[i] = conductance / 2.0;
+		conductance = 1.0 / (1.0 - 1.0 / FOURTH2 / (1.0 / conductance + 1.0)) - 1.0;
+	}
+	conductance_[0] = 1.0e-8; /* Avoid divide by zero */
+
+	/**
+	 * YM2149 AC + DC components model:
+	 * (Note that Maxvol is 65119 in Simoes' table, 65535 in Gerard's)
+	 *
+	 * Sum the conductances as a function of a voltage divider:
+	 * Vout=Vin*Rout/(Rout+Rin)
+	 */
+	for (i = 0; i < 32; i++)
+		for (j = 0; j < 32; j++)
+		for (k = 0; k < 32; k++)
+		{
+			dac[i][j][k] = ((MaxVol * WARP) / (1.0 +
+			1.0 / (conductance_[i] + conductance_[j] + conductance_[k])));
+		}
+
+	/**
+	 * YM2149 DC component model:
+	 * R8=1k (pulldown) + YM//1K (pullup) with YM 50% duty PWM
+	 * (Note that MaxVol is 46602 in Paulo Simoes Quartet mode table)
+	 *
+	 *	for (i = 0; i < 32; i++)
+	*		for (j = 0; j < 32; j++)
+	*			for (k = 0; k < 32; k++)
+	*			{
+	*				volumetable[i][j][k] = (ymu16)(0.5+(MaxVol*WARP)/(1.0 +
+	*					2.0/(conductance_[i]+conductance_[j]+conductance_[k])));
+	*			}
+   */
+}
 
 static void reset_segment(struct ayumi* ay);
 
@@ -208,18 +276,28 @@ static void update_mixer(struct ayumi* ay) {
     } else {
       vol_index = ch->e_on ? envelope : ch->volume * 2 + 1;
     }
+	ay->channel_volume[i] = out ? vol_index : 0;
     out *= vol_index;
-    ay->channel_out[i] = ay->dac_table[out];
-    ay->left += ay->channel_out[i] * ch->pan_left;
-    ay->right += ay->channel_out[i] * ch->pan_right;
+	ay->channel_out[i] = ay->dac_table[out];
+	ay->left += ay->channel_out[i] * ch->pan_left;
+	ay->right += ay->channel_out[i] * ch->pan_right;
+  }
+  if (ay->is_st) {
+	double st_mix = ST_dac_table[ay->channel_volume[0]][ay->channel_volume[1]][ay->channel_volume[2]] * 2.0;
+	ay->left = st_mix;
+	ay->right = st_mix;
   }
 }
 
-int ayumi_configure(struct ayumi* ay, int is_ym, double clock_rate, int sr) {
+int ayumi_configure(struct ayumi* ay, int is_ym, double clock_rate, int sr, int is_st) {
   int i;
   memset(ay, 0, sizeof(struct ayumi));
   ay->step = clock_rate / (sr * 8 * DECIMATE_FACTOR);
   ay->dac_table = is_ym ? YM_dac_table : AY_dac_table;
+  ay->is_st = is_st;
+  if (is_st) {
+	generate_dac(ST_dac_table);
+  }
   ay->noise = 1;
   ayumi_set_envelope(ay, 1);
   for (i = 0; i < TONE_CHANNELS; i += 1) {

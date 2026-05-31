@@ -66,6 +66,8 @@ struct ayumi {
   int envelope_segment;
   int envelope;
   const double* dac_table;
+  int is_st;
+  int channel_volume[TONE_CHANNELS];
   double step;
   double x;
   struct interpolator interpolator_left;
@@ -81,7 +83,7 @@ struct ayumi {
   double channel_out[TONE_CHANNELS];
 };
 
-int ayumi_configure(struct ayumi* ay, int is_ym, double clock_rate, int sr);
+int ayumi_configure(struct ayumi* ay, int is_ym, double clock_rate, int sr, int is_st);
 void ayumi_set_pan(struct ayumi* ay, int index, double pan, int is_eqp);
 void ayumi_set_tone(struct ayumi* ay, int index, int period);
 void ayumi_set_noise(struct ayumi* ay, int period);
