@@ -27,8 +27,14 @@ struct sid_state {
 struct syncbuzzer_state {
   int enabled;
   int period;
+  int period_low;
   int counter;
+  int pwm_enabled;
   int shape;
+  int waveform[SID_WAVEFORM_MAX];
+  int length;
+  int position;
+  int loop;
 };
 
 struct tone_channel {
@@ -94,6 +100,8 @@ void ayumi_set_sid_pwm(struct ayumi* ay, int index, int enabled, int period_high
 void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
 void ayumi_sid_reset(struct ayumi* ay, int index);
 void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, int shape);
+void ayumi_set_syncbuzzer_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low);
+void ayumi_set_syncbuzzer_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
 void ayumi_syncbuzzer_reset(struct ayumi* ay, int index);
 int ayumi_get_sid_active_period(struct ayumi* ay, int index);
 int ayumi_struct_size(void);

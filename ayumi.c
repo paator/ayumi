@@ -243,18 +243,51 @@ static int sid_volume_index(struct tone_channel* ch) {
   return vol * 2 + 1;
 }
 
+static int syncbuzzer_active_shape(struct syncbuzzer_state* syncbuzzer) {
+  if (syncbuzzer->length > 0) {
+    if (syncbuzzer->position < 0 || syncbuzzer->position >= syncbuzzer->length) {
+      syncbuzzer->position = 0;
+    }
+    return syncbuzzer->waveform[syncbuzzer->position] & 0xf;
+  }
+  return syncbuzzer->shape & 0xf;
+}
+
 static void update_syncbuzzer(struct ayumi* ay, int index) {
   struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
+  int active_period;
   if (!syncbuzzer->enabled) {
     return;
   }
-  if (syncbuzzer->period <= 0) {
-    syncbuzzer->period = 1;
+  if (syncbuzzer->pwm_enabled && syncbuzzer->length >= 2) {
+    if (syncbuzzer->position < 0 || syncbuzzer->position > 1) {
+      syncbuzzer->position = 0;
+    }
+    active_period = syncbuzzer->position == 0 ? syncbuzzer->period : syncbuzzer->period_low;
+  } else {
+    active_period = syncbuzzer->period;
+  }
+  if (active_period <= 0) {
+    active_period = 1;
   }
   syncbuzzer->counter += 1;
-  if (syncbuzzer->counter >= syncbuzzer->period) {
+  if (syncbuzzer->counter >= active_period) {
     syncbuzzer->counter = 0;
-    ayumi_set_envelope_shape(ay, syncbuzzer->shape);
+    if (syncbuzzer->pwm_enabled && syncbuzzer->length >= 2) {
+      syncbuzzer->position = (syncbuzzer->position + 1) % 2;
+      ayumi_set_envelope_shape(ay, syncbuzzer->waveform[syncbuzzer->position] & 0xf);
+    } else if (syncbuzzer->length >= 2) {
+      syncbuzzer->position += 1;
+      if (syncbuzzer->position >= syncbuzzer->length) {
+        syncbuzzer->position =
+          syncbuzzer->loop >= 0 && syncbuzzer->loop < syncbuzzer->length ? syncbuzzer->loop : 0;
+      }
+      ayumi_set_envelope_shape(ay, syncbuzzer->waveform[syncbuzzer->position] & 0xf);
+    } else if (syncbuzzer->length == 1) {
+      ayumi_set_envelope_shape(ay, syncbuzzer->waveform[0] & 0xf);
+    } else {
+      ayumi_set_envelope_shape(ay, syncbuzzer->shape & 0xf);
+    }
   }
 }
 
@@ -393,11 +426,57 @@ void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, 
   struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
   syncbuzzer->enabled = enabled & 1;
   syncbuzzer->period = period <= 0 ? 1 : period;
+  syncbuzzer->period_low = syncbuzzer->period;
+  syncbuzzer->pwm_enabled = 0;
   syncbuzzer->shape = shape & 0xf;
 }
 
+void ayumi_set_syncbuzzer_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low) {
+  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
+  syncbuzzer->enabled = enabled & 1;
+  syncbuzzer->period = period_high <= 0 ? 1 : period_high;
+  syncbuzzer->period_low = period_low <= 0 ? 1 : period_low;
+  syncbuzzer->pwm_enabled = enabled & 1;
+}
+
+void ayumi_set_syncbuzzer_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
+  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
+  int i;
+  int copy_length = length;
+  if (copy_length > SID_WAVEFORM_MAX) {
+    copy_length = SID_WAVEFORM_MAX;
+  }
+  if (copy_length < 0) {
+    copy_length = 0;
+  }
+  for (i = 0; i < copy_length; i += 1) {
+    syncbuzzer->waveform[i] = values[i] & 0xf;
+  }
+  syncbuzzer->length = copy_length;
+  if (syncbuzzer->length <= 0) {
+    syncbuzzer->position = 0;
+    syncbuzzer->counter = 0;
+    syncbuzzer->loop = 0;
+    return;
+  }
+  if (loop < 0 || loop >= syncbuzzer->length) {
+    syncbuzzer->loop = 0;
+  } else {
+    syncbuzzer->loop = loop;
+  }
+  if (syncbuzzer->position >= syncbuzzer->length) {
+    syncbuzzer->position = 0;
+  }
+  syncbuzzer->shape = syncbuzzer_active_shape(syncbuzzer);
+}
+
 void ayumi_syncbuzzer_reset(struct ayumi* ay, int index) {
-  ay->channels[index].syncbuzzer.counter = 0;
+  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
+  syncbuzzer->counter = 0;
+  syncbuzzer->position = 0;
+  if (syncbuzzer->enabled) {
+    ayumi_set_envelope_shape(ay, syncbuzzer_active_shape(syncbuzzer));
+  }
 }
 
 int ayumi_get_sid_active_period(struct ayumi* ay, int index) {
