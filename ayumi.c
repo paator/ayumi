@@ -194,6 +194,16 @@ int update_envelope(struct ayumi* ay) {
   return ay->envelope;
 }
 
+static int clamp_fm_semitone(int value) {
+  if (value < -127) {
+    return -127;
+  }
+  if (value > 128) {
+    return 128;
+  }
+  return value;
+}
+
 static int timer_effect_step_value(struct timer_effect_state* te) {
   if (te->length <= 0) {
     return 0;
@@ -201,7 +211,33 @@ static int timer_effect_step_value(struct timer_effect_state* te) {
   if (te->position < 0 || te->position >= te->length) {
     te->position = 0;
   }
+  if (te->kind == TIMER_EFFECT_KIND_TONE) {
+    return clamp_fm_semitone(te->waveform[te->position]);
+  }
   return te->waveform[te->position] & 0xf;
+}
+
+static int fm_tone_period(struct tone_channel* ch) {
+  struct timer_effect_state* te = &ch->timer_effect;
+  int semitone;
+  double factor;
+  int period;
+  if (!te->enabled || te->kind != TIMER_EFFECT_KIND_TONE || te->length <= 0) {
+    return ch->tone_period;
+  }
+  if (te->position < 0 || te->position >= te->length) {
+    te->position = 0;
+  }
+  semitone = clamp_fm_semitone(te->waveform[te->position]);
+  factor = pow(2.0, -semitone / 12.0);
+  period = (int) (llround(te->base_tone_period * factor));
+  period &= 0xfff;
+  return (period == 0) ? 1 : period;
+}
+
+static void apply_fm_tone(struct ayumi* ay, int index) {
+  struct tone_channel* ch = &ay->channels[index];
+  ayumi_set_tone(ay, index, fm_tone_period(ch));
 }
 
 static int timer_effect_active_period(struct timer_effect_state* te) {
@@ -253,6 +289,9 @@ static void update_timer_effect(struct ayumi* ay, int index) {
     if (te->kind == TIMER_EFFECT_KIND_ENVELOPE_SHAPE) {
       timer_effect_advance_position(te);
       ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
+    } else if (te->kind == TIMER_EFFECT_KIND_TONE) {
+      timer_effect_advance_position(te);
+      apply_fm_tone(ay, index);
     } else {
       timer_effect_advance_position(te);
     }
@@ -354,7 +393,7 @@ void ayumi_set_volume(struct ayumi* ay, int index, int volume) {
   ay->channels[index].volume = volume & 0xf;
 }
 
-void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume) {
+void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period) {
   struct timer_effect_state* te = &ay->channels[index].timer_effect;
   te->enabled = enabled & 1;
   te->kind = kind & 0xf;
@@ -362,6 +401,13 @@ void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, 
   te->period = period <= 0 ? 1 : period;
   te->period_low = period_low <= 0 ? 1 : period_low;
   te->base_volume = base_volume & 0xf;
+  te->base_tone_period = base_tone_period & 0xfff;
+  if (te->base_tone_period == 0) {
+    te->base_tone_period = 1;
+  }
+  if (te->enabled && te->kind == TIMER_EFFECT_KIND_TONE && te->length > 0) {
+    apply_fm_tone(ay, index);
+  }
 }
 
 void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
@@ -375,7 +421,11 @@ void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* val
     copy_length = 0;
   }
   for (i = 0; i < copy_length; i += 1) {
-    te->waveform[i] = values[i] & 0xf;
+    if (te->kind == TIMER_EFFECT_KIND_TONE) {
+      te->waveform[i] = clamp_fm_semitone(values[i]);
+    } else {
+      te->waveform[i] = values[i] & 0xf;
+    }
   }
   te->length = copy_length;
   if (te->length <= 0) {
@@ -392,6 +442,9 @@ void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* val
   if (te->position >= te->length) {
     te->position = 0;
   }
+  if (te->enabled && te->kind == TIMER_EFFECT_KIND_TONE && te->length > 0) {
+    apply_fm_tone(ay, index);
+  }
 }
 
 void ayumi_timer_effect_reset(struct ayumi* ay, int index) {
@@ -400,6 +453,8 @@ void ayumi_timer_effect_reset(struct ayumi* ay, int index) {
   te->position = 0;
   if (te->enabled && te->kind == TIMER_EFFECT_KIND_ENVELOPE_SHAPE) {
     ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
+  } else if (te->enabled && te->kind == TIMER_EFFECT_KIND_TONE && te->length > 0) {
+    apply_fm_tone(ay, index);
   }
 }
 

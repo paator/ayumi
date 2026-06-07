@@ -14,7 +14,8 @@ enum {
 enum {
   TIMER_EFFECT_KIND_NONE = 0,
   TIMER_EFFECT_KIND_VOLUME = 1,
-  TIMER_EFFECT_KIND_ENVELOPE_SHAPE = 2
+  TIMER_EFFECT_KIND_ENVELOPE_SHAPE = 2,
+  TIMER_EFFECT_KIND_TONE = 3
 };
 
 enum {
@@ -31,6 +32,7 @@ struct timer_effect_state {
   int period_low;
   int counter;
   int base_volume;
+  int base_tone_period;
   int waveform[TIMER_EFFECT_WAVEFORM_MAX];
   int length;
   int position;
@@ -94,7 +96,7 @@ void ayumi_set_tone(struct ayumi* ay, int index, int period);
 void ayumi_set_noise(struct ayumi* ay, int period);
 void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on);
 void ayumi_set_volume(struct ayumi* ay, int index, int volume);
-void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume);
+void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period);
 void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
 void ayumi_timer_effect_reset(struct ayumi* ay, int index);
 int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index);
