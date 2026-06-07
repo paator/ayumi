@@ -194,101 +194,87 @@ int update_envelope(struct ayumi* ay) {
   return ay->envelope;
 }
 
-static void update_sid(struct tone_channel* ch) {
-  struct sid_state* sid = &ch->sid;
+static int timer_effect_step_value(struct timer_effect_state* te) {
+  if (te->length <= 0) {
+    return 0;
+  }
+  if (te->position < 0 || te->position >= te->length) {
+    te->position = 0;
+  }
+  return te->waveform[te->position] & 0xf;
+}
+
+static int timer_effect_active_period(struct timer_effect_state* te) {
   int active_period;
   int w;
-  if (!sid->enabled || sid->length <= 0) {
-    return;
+  if (!te->enabled || te->kind == TIMER_EFFECT_KIND_NONE) {
+    return 1;
   }
-  active_period = sid->period;
-  if (sid->pwm_enabled) {
-    if (sid->position < 0 || sid->position >= sid->length) {
-      sid->position = 0;
+  active_period = te->period;
+  if (te->pwm_mode == TIMER_PWM_MODE_BY_STEP_VALUE && te->length > 0) {
+    w = timer_effect_step_value(te);
+    active_period = (w == 0) ? te->period_low : te->period;
+  } else if (te->pwm_mode == TIMER_PWM_MODE_BY_DUTY_INDEX && te->length >= 2) {
+    if (te->position < 0 || te->position > 1) {
+      te->position = 0;
     }
-    w = sid->waveform[sid->position] & 0xf;
-    active_period = (w == 0) ? sid->period_low : sid->period;
+    active_period = te->position == 0 ? te->period : te->period_low;
   }
   if (active_period <= 0) {
     active_period = 1;
   }
-  sid->counter += 1;
-  if (sid->counter >= active_period) {
-    sid->counter = 0;
-    sid->position += 1;
-    if (sid->position >= sid->length) {
-      sid->position = sid->loop >= 0 && sid->loop < sid->length ? sid->loop : 0;
+  return active_period;
+}
+
+static void timer_effect_advance_position(struct timer_effect_state* te) {
+  if (te->pwm_mode == TIMER_PWM_MODE_BY_DUTY_INDEX && te->length >= 2) {
+    te->position = (te->position + 1) % 2;
+    return;
+  }
+  if (te->length <= 0) {
+    return;
+  }
+  te->position += 1;
+  if (te->position >= te->length) {
+    te->position = te->loop >= 0 && te->loop < te->length ? te->loop : 0;
+  }
+}
+
+static void update_timer_effect(struct ayumi* ay, int index) {
+  struct timer_effect_state* te = &ay->channels[index].timer_effect;
+  int active_period;
+  if (!te->enabled || te->kind == TIMER_EFFECT_KIND_NONE) {
+    return;
+  }
+  active_period = timer_effect_active_period(te);
+  te->counter += 1;
+  if (te->counter >= active_period) {
+    te->counter = 0;
+    if (te->kind == TIMER_EFFECT_KIND_ENVELOPE_SHAPE) {
+      timer_effect_advance_position(te);
+      ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
+    } else {
+      timer_effect_advance_position(te);
     }
   }
 }
 
-static int sid_volume_index(struct tone_channel* ch) {
-  struct sid_state* sid = &ch->sid;
+static int timer_effect_volume_index(struct tone_channel* ch) {
+  struct timer_effect_state* te = &ch->timer_effect;
   int w;
   int vol;
-  if (!sid->enabled || sid->length <= 0) {
+  if (!te->enabled || te->kind != TIMER_EFFECT_KIND_VOLUME || te->length <= 0) {
     return ch->volume * 2 + 1;
   }
-  if (sid->position < 0 || sid->position >= sid->length) {
-    sid->position = 0;
-  }
-  w = sid->waveform[sid->position] & 0xf;
+  w = timer_effect_step_value(te);
   if (w == 0) {
     return 0;
   }
-  vol = (w * sid->base_volume + 14) / 15;
+  vol = (w * te->base_volume + 14) / 15;
   if (vol > 15) {
     vol = 15;
   }
   return vol * 2 + 1;
-}
-
-static int syncbuzzer_active_shape(struct syncbuzzer_state* syncbuzzer) {
-  if (syncbuzzer->length > 0) {
-    if (syncbuzzer->position < 0 || syncbuzzer->position >= syncbuzzer->length) {
-      syncbuzzer->position = 0;
-    }
-    return syncbuzzer->waveform[syncbuzzer->position] & 0xf;
-  }
-  return syncbuzzer->shape & 0xf;
-}
-
-static void update_syncbuzzer(struct ayumi* ay, int index) {
-  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
-  int active_period;
-  if (!syncbuzzer->enabled) {
-    return;
-  }
-  if (syncbuzzer->pwm_enabled && syncbuzzer->length >= 2) {
-    if (syncbuzzer->position < 0 || syncbuzzer->position > 1) {
-      syncbuzzer->position = 0;
-    }
-    active_period = syncbuzzer->position == 0 ? syncbuzzer->period : syncbuzzer->period_low;
-  } else {
-    active_period = syncbuzzer->period;
-  }
-  if (active_period <= 0) {
-    active_period = 1;
-  }
-  syncbuzzer->counter += 1;
-  if (syncbuzzer->counter >= active_period) {
-    syncbuzzer->counter = 0;
-    if (syncbuzzer->pwm_enabled && syncbuzzer->length >= 2) {
-      syncbuzzer->position = (syncbuzzer->position + 1) % 2;
-      ayumi_set_envelope_shape(ay, syncbuzzer->waveform[syncbuzzer->position] & 0xf);
-    } else if (syncbuzzer->length >= 2) {
-      syncbuzzer->position += 1;
-      if (syncbuzzer->position >= syncbuzzer->length) {
-        syncbuzzer->position =
-          syncbuzzer->loop >= 0 && syncbuzzer->loop < syncbuzzer->length ? syncbuzzer->loop : 0;
-      }
-      ayumi_set_envelope_shape(ay, syncbuzzer->waveform[syncbuzzer->position] & 0xf);
-    } else if (syncbuzzer->length == 1) {
-      ayumi_set_envelope_shape(ay, syncbuzzer->waveform[0] & 0xf);
-    } else {
-      ayumi_set_envelope_shape(ay, syncbuzzer->shape & 0xf);
-    }
-  }
 }
 
 static void update_mixer(struct ayumi* ay) {
@@ -302,10 +288,9 @@ static void update_mixer(struct ayumi* ay) {
   for (i = 0; i < TONE_CHANNELS; i += 1) {
     struct tone_channel* ch = &ay->channels[i];
     out = (update_tone(ay, i) | ch->t_off) & (noise | ch->n_off);
-    update_sid(ch);
-    update_syncbuzzer(ay, i);
-    if (ch->sid.enabled && !ch->e_on) {
-      vol_index = sid_volume_index(ch);
+    update_timer_effect(ay, i);
+    if (ch->timer_effect.enabled && ch->timer_effect.kind == TIMER_EFFECT_KIND_VOLUME && !ch->e_on) {
+      vol_index = timer_effect_volume_index(ch);
     } else {
       vol_index = ch->e_on ? envelope : ch->volume * 2 + 1;
     }
@@ -369,133 +354,61 @@ void ayumi_set_volume(struct ayumi* ay, int index, int volume) {
   ay->channels[index].volume = volume & 0xf;
 }
 
-void ayumi_set_sid(struct ayumi* ay, int index, int enabled, int period, int base_volume) {
-  struct sid_state* sid = &ay->channels[index].sid;
-  sid->enabled = enabled & 1;
-  sid->period = period <= 0 ? 1 : period;
-  sid->base_volume = base_volume & 0xf;
-  sid->pwm_enabled = 0;
-  sid->period_low = sid->period;
+void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume) {
+  struct timer_effect_state* te = &ay->channels[index].timer_effect;
+  te->enabled = enabled & 1;
+  te->kind = kind & 0xf;
+  te->pwm_mode = pwm_mode & 0xf;
+  te->period = period <= 0 ? 1 : period;
+  te->period_low = period_low <= 0 ? 1 : period_low;
+  te->base_volume = base_volume & 0xf;
 }
 
-void ayumi_set_sid_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low, int base_volume) {
-  struct sid_state* sid = &ay->channels[index].sid;
-  sid->enabled = enabled & 1;
-  sid->period = period_high <= 0 ? 1 : period_high;
-  sid->period_low = period_low <= 0 ? 1 : period_low;
-  sid->base_volume = base_volume & 0xf;
-  sid->pwm_enabled = enabled & 1;
-}
-
-void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
-  struct sid_state* sid = &ay->channels[index].sid;
+void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
+  struct timer_effect_state* te = &ay->channels[index].timer_effect;
   int i;
   int copy_length = length;
-  if (copy_length > SID_WAVEFORM_MAX) {
-    copy_length = SID_WAVEFORM_MAX;
+  if (copy_length > TIMER_EFFECT_WAVEFORM_MAX) {
+    copy_length = TIMER_EFFECT_WAVEFORM_MAX;
   }
   if (copy_length < 0) {
     copy_length = 0;
   }
   for (i = 0; i < copy_length; i += 1) {
-    sid->waveform[i] = values[i] & 0xf;
+    te->waveform[i] = values[i] & 0xf;
   }
-  sid->length = copy_length;
-  if (sid->length <= 0) {
-    sid->position = 0;
-    sid->counter = 0;
-    sid->loop = 0;
+  te->length = copy_length;
+  if (te->length <= 0) {
+    te->position = 0;
+    te->counter = 0;
+    te->loop = 0;
     return;
   }
-  if (loop < 0 || loop >= sid->length) {
-    sid->loop = 0;
+  if (loop < 0 || loop >= te->length) {
+    te->loop = 0;
   } else {
-    sid->loop = loop;
+    te->loop = loop;
   }
-  if (sid->position >= sid->length) {
-    sid->position = 0;
-  }
-}
-
-void ayumi_sid_reset(struct ayumi* ay, int index) {
-  ay->channels[index].sid.counter = 0;
-  ay->channels[index].sid.position = 0;
-}
-
-void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, int shape) {
-  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
-  syncbuzzer->enabled = enabled & 1;
-  syncbuzzer->period = period <= 0 ? 1 : period;
-  syncbuzzer->period_low = syncbuzzer->period;
-  syncbuzzer->pwm_enabled = 0;
-  syncbuzzer->shape = shape & 0xf;
-}
-
-void ayumi_set_syncbuzzer_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low) {
-  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
-  syncbuzzer->enabled = enabled & 1;
-  syncbuzzer->period = period_high <= 0 ? 1 : period_high;
-  syncbuzzer->period_low = period_low <= 0 ? 1 : period_low;
-  syncbuzzer->pwm_enabled = enabled & 1;
-}
-
-void ayumi_set_syncbuzzer_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
-  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
-  int i;
-  int copy_length = length;
-  if (copy_length > SID_WAVEFORM_MAX) {
-    copy_length = SID_WAVEFORM_MAX;
-  }
-  if (copy_length < 0) {
-    copy_length = 0;
-  }
-  for (i = 0; i < copy_length; i += 1) {
-    syncbuzzer->waveform[i] = values[i] & 0xf;
-  }
-  syncbuzzer->length = copy_length;
-  if (syncbuzzer->length <= 0) {
-    syncbuzzer->position = 0;
-    syncbuzzer->counter = 0;
-    syncbuzzer->loop = 0;
-    return;
-  }
-  if (loop < 0 || loop >= syncbuzzer->length) {
-    syncbuzzer->loop = 0;
-  } else {
-    syncbuzzer->loop = loop;
-  }
-  if (syncbuzzer->position >= syncbuzzer->length) {
-    syncbuzzer->position = 0;
-  }
-  syncbuzzer->shape = syncbuzzer_active_shape(syncbuzzer);
-}
-
-void ayumi_syncbuzzer_reset(struct ayumi* ay, int index) {
-  struct syncbuzzer_state* syncbuzzer = &ay->channels[index].syncbuzzer;
-  syncbuzzer->counter = 0;
-  syncbuzzer->position = 0;
-  if (syncbuzzer->enabled) {
-    ayumi_set_envelope_shape(ay, syncbuzzer_active_shape(syncbuzzer));
+  if (te->position >= te->length) {
+    te->position = 0;
   }
 }
 
-int ayumi_get_sid_active_period(struct ayumi* ay, int index) {
-  struct sid_state* sid = &ay->channels[index].sid;
-  int w;
-  if (!sid->enabled) {
+void ayumi_timer_effect_reset(struct ayumi* ay, int index) {
+  struct timer_effect_state* te = &ay->channels[index].timer_effect;
+  te->counter = 0;
+  te->position = 0;
+  if (te->enabled && te->kind == TIMER_EFFECT_KIND_ENVELOPE_SHAPE) {
+    ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
+  }
+}
+
+int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index) {
+  struct timer_effect_state* te = &ay->channels[index].timer_effect;
+  if (!te->enabled || te->kind == TIMER_EFFECT_KIND_NONE) {
     return 0;
   }
-  if (!sid->pwm_enabled || sid->length <= 0) {
-    return sid->period <= 0 ? 1 : sid->period;
-  }
-  if (sid->position < 0 || sid->position >= sid->length) {
-    sid->position = 0;
-  }
-  w = sid->waveform[sid->position] & 0xf;
-  if (w == 0) {
-    return sid->period_low <= 0 ? 1 : sid->period_low;
-  }
-  return sid->period <= 0 ? 1 : sid->period;
+  return timer_effect_active_period(te);
 }
 
 int ayumi_struct_size(void) {

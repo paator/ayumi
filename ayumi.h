@@ -8,30 +8,30 @@ enum {
   DECIMATE_FACTOR = 8,
   FIR_SIZE = 192,
   DC_FILTER_SIZE = 1024,
-  SID_WAVEFORM_MAX = 32
+  TIMER_EFFECT_WAVEFORM_MAX = 32
 };
 
-struct sid_state {
+enum {
+  TIMER_EFFECT_KIND_NONE = 0,
+  TIMER_EFFECT_KIND_VOLUME = 1,
+  TIMER_EFFECT_KIND_ENVELOPE_SHAPE = 2
+};
+
+enum {
+  TIMER_PWM_MODE_OFF = 0,
+  TIMER_PWM_MODE_BY_STEP_VALUE = 1,
+  TIMER_PWM_MODE_BY_DUTY_INDEX = 2
+};
+
+struct timer_effect_state {
   int enabled;
+  int kind;
+  int pwm_mode;
   int period;
+  int period_low;
   int counter;
-  int position;
-  int length;
-  int loop;
   int base_volume;
-  int waveform[SID_WAVEFORM_MAX];
-  int pwm_enabled;
-  int period_low;
-};
-
-struct syncbuzzer_state {
-  int enabled;
-  int period;
-  int period_low;
-  int counter;
-  int pwm_enabled;
-  int shape;
-  int waveform[SID_WAVEFORM_MAX];
+  int waveform[TIMER_EFFECT_WAVEFORM_MAX];
   int length;
   int position;
   int loop;
@@ -45,8 +45,7 @@ struct tone_channel {
   int n_off;
   int e_on;
   int volume;
-  struct sid_state sid;
-  struct syncbuzzer_state syncbuzzer;
+  struct timer_effect_state timer_effect;
   double pan_left;
   double pan_right;
 };
@@ -95,15 +94,10 @@ void ayumi_set_tone(struct ayumi* ay, int index, int period);
 void ayumi_set_noise(struct ayumi* ay, int period);
 void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on);
 void ayumi_set_volume(struct ayumi* ay, int index, int volume);
-void ayumi_set_sid(struct ayumi* ay, int index, int enabled, int period, int base_volume);
-void ayumi_set_sid_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low, int base_volume);
-void ayumi_set_sid_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
-void ayumi_sid_reset(struct ayumi* ay, int index);
-void ayumi_set_syncbuzzer(struct ayumi* ay, int index, int enabled, int period, int shape);
-void ayumi_set_syncbuzzer_pwm(struct ayumi* ay, int index, int enabled, int period_high, int period_low);
-void ayumi_set_syncbuzzer_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
-void ayumi_syncbuzzer_reset(struct ayumi* ay, int index);
-int ayumi_get_sid_active_period(struct ayumi* ay, int index);
+void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume);
+void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
+void ayumi_timer_effect_reset(struct ayumi* ay, int index);
+int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index);
 int ayumi_struct_size(void);
 void ayumi_set_envelope(struct ayumi* ay, int period);
 void ayumi_set_envelope_shape(struct ayumi* ay, int shape);
