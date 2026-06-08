@@ -494,6 +494,53 @@ int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index) {
   return timer_effect_active_period(te);
 }
 
+void ayumi_get_registers(struct ayumi* ay, unsigned char* out) {
+  int i;
+  int mixer = 0;
+  int tone_period;
+  int volume_byte;
+  int vol_index;
+  struct tone_channel* ch;
+  struct timer_effect_state* te;
+
+  for (i = 0; i < 14; i += 1) {
+    out[i] = 0;
+  }
+
+  for (i = 0; i < TONE_CHANNELS; i += 1) {
+    ch = &ay->channels[i];
+    tone_period = ch->tone_period & 0xfff;
+    out[i * 2] = tone_period & 0xff;
+    out[i * 2 + 1] = (tone_period >> 8) & 0x0f;
+
+    if (ch->t_off) {
+      mixer |= 1 << i;
+    }
+    if (ch->n_off) {
+      mixer |= 1 << (i + 3);
+    }
+
+    if (ch->e_on) {
+      volume_byte = (ch->volume & 0xf) | 0x10;
+    } else {
+      te = &ch->timer_effect;
+      if (te->enabled && te->kind == TIMER_EFFECT_KIND_VOLUME && te->length > 0) {
+        vol_index = timer_effect_volume_index(ch);
+        volume_byte = vol_index == 0 ? 0 : (vol_index - 1) / 2;
+      } else {
+        volume_byte = ch->volume & 0xf;
+      }
+    }
+    out[8 + i] = volume_byte & 0xff;
+  }
+
+  out[6] = ay->noise_period & 0x1f;
+  out[7] = mixer & 0x3f;
+  out[11] = ay->envelope_period & 0xff;
+  out[12] = (ay->envelope_period >> 8) & 0xff;
+  out[13] = ay->envelope_shape & 0x0f;
+}
+
 int ayumi_struct_size(void) {
   return (int) sizeof(struct ayumi);
 }

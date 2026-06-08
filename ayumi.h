@@ -106,6 +106,7 @@ void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, 
 void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
 void ayumi_timer_effect_reset(struct ayumi* ay, int index);
 int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index);
+void ayumi_get_registers(struct ayumi* ay, unsigned char* out);
 int ayumi_struct_size(void);
 void ayumi_set_envelope(struct ayumi* ay, int period);
 void ayumi_set_envelope_shape(struct ayumi* ay, int shape);
