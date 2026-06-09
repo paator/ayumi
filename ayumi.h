@@ -15,7 +15,15 @@ enum {
   TIMER_EFFECT_KIND_NONE = 0,
   TIMER_EFFECT_KIND_VOLUME = 1,
   TIMER_EFFECT_KIND_ENVELOPE_SHAPE = 2,
-  TIMER_EFFECT_KIND_TONE = 3
+  TIMER_EFFECT_KIND_TONE = 3,
+  TIMER_EFFECT_KIND_ENVELOPE_FM = 4
+};
+
+enum {
+  TIMER_LAYER_VOLUME = 1,
+  TIMER_LAYER_ENVELOPE_SHAPE = 2,
+  TIMER_LAYER_TONE = 4,
+  TIMER_LAYER_ENVELOPE_FM = 8
 };
 
 enum {
@@ -31,7 +39,7 @@ enum {
 
 struct timer_effect_state {
   int enabled;
-  int kind;
+  int layers;
   int pwm_mode;
   int fm_offset_mode;
   int period;
@@ -39,7 +47,15 @@ struct timer_effect_state {
   int counter;
   int base_volume;
   int base_tone_period;
-  int waveform[TIMER_EFFECT_WAVEFORM_MAX];
+  int base_envelope_period;
+  int volume_waveform[TIMER_EFFECT_WAVEFORM_MAX];
+  int envelope_shape_waveform[TIMER_EFFECT_WAVEFORM_MAX];
+  int tone_waveform[TIMER_EFFECT_WAVEFORM_MAX];
+  int envelope_period_waveform[TIMER_EFFECT_WAVEFORM_MAX];
+  int volume_length;
+  int envelope_shape_length;
+  int tone_length;
+  int envelope_period_length;
   int length;
   int position;
   int loop;
@@ -102,8 +118,8 @@ void ayumi_set_tone(struct ayumi* ay, int index, int period);
 void ayumi_set_noise(struct ayumi* ay, int period);
 void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on);
 void ayumi_set_volume(struct ayumi* ay, int index, int volume);
-void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period, int fm_offset_mode);
-void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
+void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int layers, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period, int base_envelope_period, int fm_offset_mode);
+void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, int layer, const int* values, int length, int loop);
 void ayumi_timer_effect_reset(struct ayumi* ay, int index);
 int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index);
 void ayumi_get_registers(struct ayumi* ay, unsigned char* out);
