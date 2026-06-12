@@ -30,6 +30,14 @@ enum {
   TIMER_FM_OFFSET_PERIOD = 1
 };
 
+enum {
+  TIMER_EFFECT_SLOT_SID = 0,
+  TIMER_EFFECT_SLOT_SYNCBUZZER = 1,
+  TIMER_EFFECT_SLOT_FM = 2,
+  TIMER_EFFECT_SLOT_ENV_FM = 3,
+  TIMER_EFFECT_SLOT_COUNT = 4
+};
+
 struct timer_effect_state {
   int enabled;
   int kind;
@@ -54,7 +62,7 @@ struct tone_channel {
   int n_off;
   int e_on;
   int volume;
-  struct timer_effect_state timer_effect;
+  struct timer_effect_state timer_effects[TIMER_EFFECT_SLOT_COUNT];
   double pan_left;
   double pan_right;
 };
@@ -104,9 +112,10 @@ void ayumi_set_noise(struct ayumi* ay, int period);
 void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on);
 void ayumi_set_volume(struct ayumi* ay, int index, int volume);
 void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period, int fm_offset_mode);
-void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop);
-void ayumi_timer_effect_reset(struct ayumi* ay, int index);
-int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index);
+void ayumi_set_timer_effect_slot(struct ayumi* ay, int index, int slot, int enabled, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period, int fm_offset_mode);
+void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, int slot, const int* values, int length, int loop);
+void ayumi_timer_effect_reset(struct ayumi* ay, int index, int slot);
+int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index, int slot);
 void ayumi_get_registers(struct ayumi* ay, unsigned char* out);
 int ayumi_struct_size(void);
 void ayumi_set_envelope(struct ayumi* ay, int period);

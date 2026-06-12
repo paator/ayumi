@@ -225,6 +225,47 @@ static int fm_pwm_enabled(struct timer_effect_state* te) {
   return (te->pwm_mode & TIMER_PWM_MODE_BY_DUTY_INDEX) != 0;
 }
 
+static int timer_effect_slot_for_kind(int kind) {
+  switch (kind) {
+    case TIMER_EFFECT_KIND_VOLUME:
+      return TIMER_EFFECT_SLOT_SID;
+    case TIMER_EFFECT_KIND_ENVELOPE_SHAPE:
+      return TIMER_EFFECT_SLOT_SYNCBUZZER;
+    case TIMER_EFFECT_KIND_TONE:
+      return TIMER_EFFECT_SLOT_FM;
+    case TIMER_EFFECT_KIND_ENVELOPE_PERIOD:
+      return TIMER_EFFECT_SLOT_ENV_FM;
+    default:
+      return TIMER_EFFECT_SLOT_SID;
+  }
+}
+
+static int timer_effect_kind_for_slot(int slot) {
+  switch (slot) {
+    case TIMER_EFFECT_SLOT_SID:
+      return TIMER_EFFECT_KIND_VOLUME;
+    case TIMER_EFFECT_SLOT_SYNCBUZZER:
+      return TIMER_EFFECT_KIND_ENVELOPE_SHAPE;
+    case TIMER_EFFECT_SLOT_FM:
+      return TIMER_EFFECT_KIND_TONE;
+    case TIMER_EFFECT_SLOT_ENV_FM:
+      return TIMER_EFFECT_KIND_ENVELOPE_PERIOD;
+    default:
+      return TIMER_EFFECT_KIND_NONE;
+  }
+}
+
+static struct timer_effect_state* channel_timer_effect(struct tone_channel* ch, int slot) {
+  if (slot < 0 || slot >= TIMER_EFFECT_SLOT_COUNT) {
+    return &ch->timer_effects[0];
+  }
+  return &ch->timer_effects[slot];
+}
+
+static int timer_effect_uses_fm_waveform_for_slot(int slot) {
+  return slot == TIMER_EFFECT_SLOT_FM || slot == TIMER_EFFECT_SLOT_ENV_FM;
+}
+
 static int timer_effect_uses_fm_waveform(struct timer_effect_state* te) {
   return te->kind == TIMER_EFFECT_KIND_TONE
     || te->kind == TIMER_EFFECT_KIND_ENVELOPE_PERIOD;
@@ -264,8 +305,8 @@ static int timer_effect_fm_period(struct timer_effect_state* te, int mask) {
 }
 
 static int timer_effect_tone_period(struct tone_channel* ch) {
-  struct timer_effect_state* te = &ch->timer_effect;
-  if (!te->enabled || te->kind != TIMER_EFFECT_KIND_TONE || te->length <= 0) {
+  struct timer_effect_state* te = channel_timer_effect(ch, TIMER_EFFECT_SLOT_FM);
+  if (!te->enabled || te->length <= 0) {
     return ch->tone_period;
   }
   return timer_effect_fm_period(te, 0xfff);
@@ -277,8 +318,8 @@ static void apply_timer_effect_tone(struct ayumi* ay, int index) {
 }
 
 static void apply_timer_effect_envelope_period(struct ayumi* ay, int index) {
-  struct timer_effect_state* te = &ay->channels[index].timer_effect;
-  if (!te->enabled || te->kind != TIMER_EFFECT_KIND_ENVELOPE_PERIOD || te->length <= 0) {
+  struct timer_effect_state* te = channel_timer_effect(&ay->channels[index], TIMER_EFFECT_SLOT_ENV_FM);
+  if (!te->enabled || te->length <= 0) {
     return;
   }
   ayumi_set_envelope(ay, timer_effect_fm_period(te, 0xffff));
@@ -320,8 +361,8 @@ static void timer_effect_advance_position(struct timer_effect_state* te) {
   }
 }
 
-static void update_timer_effect(struct ayumi* ay, int index) {
-  struct timer_effect_state* te = &ay->channels[index].timer_effect;
+static void update_timer_effect_slot(struct ayumi* ay, int index, int slot) {
+  struct timer_effect_state* te = channel_timer_effect(&ay->channels[index], slot);
   int active_period;
   if (!te->enabled || te->kind == TIMER_EFFECT_KIND_NONE) {
     return;
@@ -330,13 +371,13 @@ static void update_timer_effect(struct ayumi* ay, int index) {
   te->counter += 1;
   if (te->counter >= active_period) {
     te->counter = 0;
-    if (te->kind == TIMER_EFFECT_KIND_ENVELOPE_SHAPE) {
+    if (slot == TIMER_EFFECT_SLOT_SYNCBUZZER) {
       timer_effect_advance_position(te);
       ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
-    } else if (te->kind == TIMER_EFFECT_KIND_TONE) {
+    } else if (slot == TIMER_EFFECT_SLOT_FM) {
       timer_effect_advance_position(te);
       apply_timer_effect_tone(ay, index);
-    } else if (te->kind == TIMER_EFFECT_KIND_ENVELOPE_PERIOD) {
+    } else if (slot == TIMER_EFFECT_SLOT_ENV_FM) {
       timer_effect_advance_position(te);
       apply_timer_effect_envelope_period(ay, index);
     } else {
@@ -346,10 +387,10 @@ static void update_timer_effect(struct ayumi* ay, int index) {
 }
 
 static int timer_effect_volume_index(struct tone_channel* ch) {
-  struct timer_effect_state* te = &ch->timer_effect;
+  struct timer_effect_state* te = channel_timer_effect(ch, TIMER_EFFECT_SLOT_SID);
   int w;
   int vol;
-  if (!te->enabled || te->kind != TIMER_EFFECT_KIND_VOLUME || te->length <= 0) {
+  if (!te->enabled || te->length <= 0) {
     return ch->volume * 2 + 1;
   }
   w = timer_effect_step_value(te);
@@ -373,9 +414,15 @@ static void update_mixer(struct ayumi* ay) {
   ay->right = 0;
   for (i = 0; i < TONE_CHANNELS; i += 1) {
     struct tone_channel* ch = &ay->channels[i];
+    int slot;
     out = (update_tone(ay, i) | ch->t_off) & (noise | ch->n_off);
-    update_timer_effect(ay, i);
-    if (ch->timer_effect.enabled && ch->timer_effect.kind == TIMER_EFFECT_KIND_VOLUME && !ch->e_on) {
+    for (slot = 0; slot < TIMER_EFFECT_SLOT_COUNT; slot += 1) {
+      update_timer_effect_slot(ay, i, slot);
+    }
+    if (
+      channel_timer_effect(ch, TIMER_EFFECT_SLOT_SID)->enabled &&
+      !ch->e_on
+    ) {
       vol_index = timer_effect_volume_index(ch);
     } else {
       vol_index = ch->e_on ? envelope : ch->volume * 2 + 1;
@@ -440,30 +487,63 @@ void ayumi_set_volume(struct ayumi* ay, int index, int volume) {
   ay->channels[index].volume = volume & 0xf;
 }
 
-void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period, int fm_offset_mode) {
-  struct timer_effect_state* te = &ay->channels[index].timer_effect;
+void ayumi_set_timer_effect_slot(struct ayumi* ay, int index, int slot, int enabled, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period, int fm_offset_mode) {
+  struct timer_effect_state* te;
+  int kind;
+  if (index < 0 || index >= TONE_CHANNELS) {
+    return;
+  }
+  if (slot < 0 || slot >= TIMER_EFFECT_SLOT_COUNT) {
+    return;
+  }
+  te = channel_timer_effect(&ay->channels[index], slot);
+  kind = timer_effect_kind_for_slot(slot);
   te->enabled = enabled & 1;
-  te->kind = kind & 0xf;
+  te->kind = kind;
   te->pwm_mode = pwm_mode & 0xf;
   te->fm_offset_mode = fm_offset_mode == TIMER_FM_OFFSET_PERIOD ? TIMER_FM_OFFSET_PERIOD : TIMER_FM_OFFSET_SEMITONE;
   te->period = period <= 0 ? 1 : period;
   te->period_low = period_low <= 0 ? 1 : period_low;
   te->base_volume = base_volume & 0xf;
   te->base_tone_period = base_tone_period
-    & (te->kind == TIMER_EFFECT_KIND_ENVELOPE_PERIOD ? 0xffff : 0xfff);
+    & (kind == TIMER_EFFECT_KIND_ENVELOPE_PERIOD ? 0xffff : 0xfff);
   if (te->base_tone_period == 0) {
     te->base_tone_period = 1;
   }
-  if (te->enabled && te->kind == TIMER_EFFECT_KIND_TONE && te->length > 0) {
+  if (te->enabled && slot == TIMER_EFFECT_SLOT_FM && te->length > 0) {
     apply_timer_effect_tone(ay, index);
   }
-  apply_timer_effect_envelope_period(ay, index);
+  if (te->enabled && slot == TIMER_EFFECT_SLOT_ENV_FM) {
+    apply_timer_effect_envelope_period(ay, index);
+  }
 }
 
-void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* values, int length, int loop) {
-  struct timer_effect_state* te = &ay->channels[index].timer_effect;
+void ayumi_set_timer_effect(struct ayumi* ay, int index, int enabled, int kind, int pwm_mode, int period, int period_low, int base_volume, int base_tone_period, int fm_offset_mode) {
+  ayumi_set_timer_effect_slot(
+    ay,
+    index,
+    timer_effect_slot_for_kind(kind),
+    enabled,
+    pwm_mode,
+    period,
+    period_low,
+    base_volume,
+    base_tone_period,
+    fm_offset_mode
+  );
+}
+
+void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, int slot, const int* values, int length, int loop) {
+  struct timer_effect_state* te;
   int i;
   int copy_length = length;
+  if (index < 0 || index >= TONE_CHANNELS) {
+    return;
+  }
+  if (slot < 0 || slot >= TIMER_EFFECT_SLOT_COUNT) {
+    return;
+  }
+  te = channel_timer_effect(&ay->channels[index], slot);
   if (copy_length > TIMER_EFFECT_WAVEFORM_MAX) {
     copy_length = TIMER_EFFECT_WAVEFORM_MAX;
   }
@@ -471,7 +551,7 @@ void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* val
     copy_length = 0;
   }
   for (i = 0; i < copy_length; i += 1) {
-    if (timer_effect_uses_fm_waveform(te)) {
+    if (timer_effect_uses_fm_waveform_for_slot(slot)) {
       te->waveform[i] = clamp_fm_waveform_value(te, values[i]);
     } else {
       te->waveform[i] = values[i] & 0xf;
@@ -492,31 +572,43 @@ void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, const int* val
   if (te->position >= te->length) {
     te->position = 0;
   }
-  if (te->enabled && te->kind == TIMER_EFFECT_KIND_TONE && te->length > 0) {
+  if (te->enabled && slot == TIMER_EFFECT_SLOT_FM && te->length > 0) {
     apply_timer_effect_tone(ay, index);
   }
-  apply_timer_effect_envelope_period(ay, index);
-}
-
-void ayumi_timer_effect_reset(struct ayumi* ay, int index) {
-  struct timer_effect_state* te = &ay->channels[index].timer_effect;
-  te->counter = 0;
-  te->position = 0;
-  if (te->enabled && te->kind == TIMER_EFFECT_KIND_ENVELOPE_SHAPE) {
-    ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
-  } else if (te->enabled && te->kind == TIMER_EFFECT_KIND_TONE && te->length > 0) {
-    apply_timer_effect_tone(ay, index);
-  } else {
+  if (te->enabled && slot == TIMER_EFFECT_SLOT_ENV_FM) {
     apply_timer_effect_envelope_period(ay, index);
   }
 }
 
-int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index) {
+void ayumi_timer_effect_reset(struct ayumi* ay, int index, int slot) {
+  struct timer_effect_state* te;
+  if (index < 0 || index >= TONE_CHANNELS) {
+    return;
+  }
+  if (slot < 0 || slot >= TIMER_EFFECT_SLOT_COUNT) {
+    return;
+  }
+  te = channel_timer_effect(&ay->channels[index], slot);
+  te->counter = 0;
+  te->position = 0;
+  if (te->enabled && slot == TIMER_EFFECT_SLOT_SYNCBUZZER) {
+    ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
+  } else if (te->enabled && slot == TIMER_EFFECT_SLOT_FM && te->length > 0) {
+    apply_timer_effect_tone(ay, index);
+  } else if (te->enabled && slot == TIMER_EFFECT_SLOT_ENV_FM) {
+    apply_timer_effect_envelope_period(ay, index);
+  }
+}
+
+int ayumi_get_timer_effect_active_period(struct ayumi* ay, int index, int slot) {
   struct timer_effect_state* te;
   if (index < 0 || index >= TONE_CHANNELS) {
     return 0;
   }
-  te = &ay->channels[index].timer_effect;
+  if (slot < 0 || slot >= TIMER_EFFECT_SLOT_COUNT) {
+    return 0;
+  }
+  te = channel_timer_effect(&ay->channels[index], slot);
   if (!te->enabled || te->kind == TIMER_EFFECT_KIND_NONE) {
     return 0;
   }
@@ -552,8 +644,8 @@ void ayumi_get_registers(struct ayumi* ay, unsigned char* out) {
     if (ch->e_on) {
       volume_byte = (ch->volume & 0xf) | 0x10;
     } else {
-      te = &ch->timer_effect;
-      if (te->enabled && te->kind == TIMER_EFFECT_KIND_VOLUME && te->length > 0) {
+      te = channel_timer_effect(ch, TIMER_EFFECT_SLOT_SID);
+      if (te->enabled && te->length > 0) {
         vol_index = timer_effect_volume_index(ch);
         volume_byte = vol_index == 0 ? 0 : (vol_index - 1) / 2;
       } else {
