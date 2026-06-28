@@ -100,6 +100,7 @@ struct ayumi {
   struct dc_filter dc_left;
   struct dc_filter dc_right;
   int dc_index;
+  int sid_volume_code[16][16];
   double left;
   double right;
   double channel_out[TONE_CHANNELS];
