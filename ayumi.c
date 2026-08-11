@@ -386,7 +386,7 @@ static void update_timer_effect_slot(struct ayumi* ay, int index, int slot) {
   }
 }
 
-static int timer_effect_volume_index(struct tone_channel* ch) {
+static int timer_effect_volume_index(struct ayumi* ay, struct tone_channel* ch) {
   struct timer_effect_state* te = channel_timer_effect(ch, TIMER_EFFECT_SLOT_SID);
   int w;
   int vol;
@@ -397,10 +397,7 @@ static int timer_effect_volume_index(struct tone_channel* ch) {
   if (w == 0) {
     return 0;
   }
-  vol = (w * te->base_volume + 14) / 15;
-  if (vol > 15) {
-    vol = 15;
-  }
+  vol = ay->sid_volume_code[te->base_volume & 0xf][w & 0xf];
   return vol * 2 + 1;
 }
 
@@ -423,7 +420,7 @@ static void update_mixer(struct ayumi* ay) {
       channel_timer_effect(ch, TIMER_EFFECT_SLOT_SID)->enabled &&
       !ch->e_on
     ) {
-      vol_index = timer_effect_volume_index(ch);
+      vol_index = timer_effect_volume_index(ay, ch);
     } else {
       vol_index = ch->e_on ? envelope : ch->volume * 2 + 1;
     }
@@ -440,12 +437,39 @@ static void update_mixer(struct ayumi* ay) {
   }
 }
 
+static int nearest_dac_code(const double* dac_table, double target) {
+  int best = 0;
+  double best_dist = fabs(dac_table[1] - target);
+  int code;
+  for (code = 0; code < 16; code += 1) {
+    double dist = fabs(dac_table[code * 2 + 1] - target);
+    if (dist <= best_dist) {
+      best = code;
+      best_dist = dist;
+    }
+  }
+  return best;
+}
+
+static void generate_sid_volume_code(struct ayumi* ay) {
+  int v;
+  int w;
+  for (v = 0; v < 16; v += 1) {
+    double volume = ay->dac_table[v * 2 + 1];
+    for (w = 0; w < 16; w += 1) {
+      double target = volume * ay->dac_table[w * 2 + 1];
+      ay->sid_volume_code[v][w] = nearest_dac_code(ay->dac_table, target);
+    }
+  }
+}
+
 int ayumi_configure(struct ayumi* ay, int is_ym, double clock_rate, int sr, int is_st) {
   int i;
   memset(ay, 0, sizeof(struct ayumi));
   ay->step = clock_rate / (sr * 8 * DECIMATE_FACTOR);
   ay->dac_table = is_ym ? YM_dac_table : AY_dac_table;
   ay->is_st = is_st;
+  generate_sid_volume_code(ay);
   if (is_st) {
 	generate_dac(ST_dac_table);
   }
@@ -646,7 +670,7 @@ void ayumi_get_registers(struct ayumi* ay, unsigned char* out) {
     } else {
       te = channel_timer_effect(ch, TIMER_EFFECT_SLOT_SID);
       if (te->enabled && te->length > 0) {
-        vol_index = timer_effect_volume_index(ch);
+        vol_index = timer_effect_volume_index(ay, ch);
         volume_byte = vol_index == 0 ? 0 : (vol_index - 1) / 2;
       } else {
         volume_byte = ch->volume & 0xf;
