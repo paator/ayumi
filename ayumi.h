@@ -3,10 +3,13 @@
 #ifndef AYUMI_H
 #define AYUMI_H
 
+#include "chip_output_resampler.h"
+
 enum {
   TONE_CHANNELS = 3,
-  DECIMATE_FACTOR = 8,
-  FIR_SIZE = 192,
+  AYUMI_RESAMPLER_CHANNELS = 2,
+  DECIMATE_FACTOR = CHIP_RESAMPLER_DECIMATE_FACTOR,
+  FIR_SIZE = CHIP_RESAMPLER_FIR_SIZE,
   DC_FILTER_SIZE = 1024,
   TIMER_EFFECT_WAVEFORM_MAX = 32
 };
@@ -67,11 +70,6 @@ struct tone_channel {
   double pan_right;
 };
 
-struct interpolator {
-  double c[4];
-  double y[4];
-};
-
 struct dc_filter {
   double sum;
   double delay[DC_FILTER_SIZE];
@@ -90,13 +88,11 @@ struct ayumi {
   const double* dac_table;
   int is_st;
   int channel_volume[TONE_CHANNELS];
-  double step;
-  double x;
-  struct interpolator interpolator_left;
-  struct interpolator interpolator_right;
-  double fir_left[FIR_SIZE * 2];
-  double fir_right[FIR_SIZE * 2];
-  int fir_index;
+  struct chip_output_resampler resampler;
+  double resampler_y[AYUMI_RESAMPLER_CHANNELS * 4];
+  double resampler_c[AYUMI_RESAMPLER_CHANNELS * 3];
+  double resampler_fir[AYUMI_RESAMPLER_CHANNELS * CHIP_RESAMPLER_FIR_SIZE * 2];
+  double resampler_output[AYUMI_RESAMPLER_CHANNELS];
   struct dc_filter dc_left;
   struct dc_filter dc_right;
   int dc_index;
