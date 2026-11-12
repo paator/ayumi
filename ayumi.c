@@ -362,6 +362,27 @@ static void timer_effect_advance_position(struct timer_effect_state* te) {
   }
 }
 
+static int syncbuzzer_step_is_envelope_off(struct tone_channel* ch) {
+  struct timer_effect_state* te = channel_timer_effect(ch, TIMER_EFFECT_SLOT_SYNCBUZZER);
+  return te->enabled && te->length > 0 && timer_effect_step_value(te) >= 15;
+}
+
+static void apply_syncbuzzer_step(struct ayumi* ay, int index) {
+  struct tone_channel* ch = &ay->channels[index];
+  struct timer_effect_state* te = channel_timer_effect(ch, TIMER_EFFECT_SLOT_SYNCBUZZER);
+  int shape;
+  if (!te->enabled || te->length <= 0) {
+    return;
+  }
+  shape = timer_effect_step_value(te);
+  if (shape >= 15) {
+    ch->e_on = 0;
+    return;
+  }
+  ch->e_on = 1;
+  ayumi_set_envelope_shape(ay, shape);
+}
+
 static void update_timer_effect_slot(struct ayumi* ay, int index, int slot) {
   struct timer_effect_state* te = channel_timer_effect(&ay->channels[index], slot);
   int active_period;
@@ -374,7 +395,7 @@ static void update_timer_effect_slot(struct ayumi* ay, int index, int slot) {
     te->counter = 0;
     if (slot == TIMER_EFFECT_SLOT_SYNCBUZZER) {
       timer_effect_advance_position(te);
-      ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
+      apply_syncbuzzer_step(ay, index);
     } else if (slot == TIMER_EFFECT_SLOT_FM) {
       timer_effect_advance_position(te);
       apply_timer_effect_tone(ay, index);
@@ -513,6 +534,9 @@ void ayumi_set_mixer(struct ayumi* ay, int index, int t_off, int n_off, int e_on
   ay->channels[index].t_off = t_off & 1;
   ay->channels[index].n_off = n_off & 1;
   ay->channels[index].e_on = e_on;
+  if (syncbuzzer_step_is_envelope_off(&ay->channels[index])) {
+    ay->channels[index].e_on = 0;
+  }
 }
 
 void ayumi_set_volume(struct ayumi* ay, int index, int volume) {
@@ -610,6 +634,9 @@ void ayumi_set_timer_effect_waveform(struct ayumi* ay, int index, int slot, cons
   if (te->enabled && slot == TIMER_EFFECT_SLOT_ENV_FM) {
     apply_timer_effect_envelope_period(ay, index);
   }
+  if (te->enabled && slot == TIMER_EFFECT_SLOT_SYNCBUZZER && te->length > 0) {
+    apply_syncbuzzer_step(ay, index);
+  }
 }
 
 void ayumi_timer_effect_reset(struct ayumi* ay, int index, int slot) {
@@ -624,7 +651,7 @@ void ayumi_timer_effect_reset(struct ayumi* ay, int index, int slot) {
   te->counter = 0;
   te->position = 0;
   if (te->enabled && slot == TIMER_EFFECT_SLOT_SYNCBUZZER) {
-    ayumi_set_envelope_shape(ay, timer_effect_step_value(te));
+    apply_syncbuzzer_step(ay, index);
   } else if (te->enabled && slot == TIMER_EFFECT_SLOT_FM && te->length > 0) {
     apply_timer_effect_tone(ay, index);
   } else if (te->enabled && slot == TIMER_EFFECT_SLOT_ENV_FM) {
